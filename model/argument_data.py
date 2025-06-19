@@ -5,7 +5,7 @@ import numpy as np
 from tqdm import tqdm
 
 # Carpetas
-input_base = 'data/dataset_pr'  # Aquí están las carpetas por locutor
+input_base = 'data/dataset_original_amplificado'  # Aquí están las carpetas por locutor
 output_base = 'data/augmented'  # Aquí se guardarán los nuevos audios
 
 # Crear estructura de carpetas de salida
@@ -24,7 +24,7 @@ def augment_audio(file_path, speaker_folder, filename):
     y_speed = librosa.effects.time_stretch(y, rate=1.1)
     sf.write(os.path.join(speaker_folder, f'speed_{filename}'), y_speed, sr)
 
-    # 2. Cambio de pitch (con argumentos nombrados)
+    # 2. Cambio de pitch 
     y_pitch = librosa.effects.pitch_shift(y=y, sr=sr, n_steps=2)
     sf.write(os.path.join(speaker_folder, f'pitch_{filename}'), y_pitch, sr)
 

@@ -1,0 +1,5 @@
+n_units_1: 245
+n_units_2: 145
+dropout_rate: 0.2261228747099748
+batch_size: 64
+optimizer: adam

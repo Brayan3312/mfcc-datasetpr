@@ -8,7 +8,7 @@ import sys
 # === Configuración ===
 MODEL_PATH = 'model/model_custom.h5'
 ENCODER_PATH = 'model/label_encoder_custom.pkl'
-AUDIO_PATH = 'data/predict/prueba100.wav'
+AUDIO_PATH = 'data/predict/prueba_w.wav'
   # <- Cambia esto por tu archivo a predecir
 
 # === 1. Cargar el modelo y codificador de etiquetas ===

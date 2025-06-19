@@ -1,79 +1,103 @@
 import numpy as np
 import os
 import pickle
-import matplotlib.pyplot as plt
+import optuna
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import accuracy_score
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.models import load_model
 
-# === 1. Cargar datos
+# === Cargar datos
 data = np.load('data/mfcc_custom_dataset.npz')
-mfccs = data['mfccs']
-labels = data['labels']
+X = data['mfccs']
+y = data['labels']
 
-# === 2. Codificar etiquetas
+# === Codificar etiquetas
 label_encoder = LabelEncoder()
-labels_encoded = label_encoder.fit_transform(labels)
-labels_categorical = to_categorical(labels_encoded)
+y_encoded = label_encoder.fit_transform(y)
+y_categorical = to_categorical(y_encoded)
 
-# === 3. Dividir datos
+# === Dividir datos
 X_train, X_val, y_train, y_val = train_test_split(
-    mfccs, labels_categorical, test_size=0.2, random_state=42, stratify=labels_encoded
+    X, y_categorical, test_size=0.2, random_state=42, stratify=y_encoded
 )
 
-# === 4. Crear modelo
-model = Sequential()
-model.add(Dense(256, activation='relu', input_shape=(mfccs.shape[1],)))
-model.add(BatchNormalization())
-model.add(Dropout(0.4))
-model.add(Dense(128, activation='relu'))
-model.add(BatchNormalization())
-model.add(Dropout(0.4))
-model.add(Dense(labels_categorical.shape[1], activation='softmax'))
+# === Optuna: función objetivo
+def objective(trial):
+    n_units_1 = trial.suggest_int("n_units_1", 64, 512)
+    n_units_2 = trial.suggest_int("n_units_2", 32, 256)
+    dropout_rate = trial.suggest_float("dropout_rate", 0.1, 0.5)
+    batch_size = trial.suggest_categorical("batch_size", [16, 32, 64])
+    optimizer = trial.suggest_categorical("optimizer", ["adam", "rmsprop", "sgd"])
 
-# === 5. Compilar modelo
-model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    model = Sequential()
+    model.add(Dense(n_units_1, activation='relu', input_shape=(X.shape[1],)))
+    model.add(BatchNormalization())
+    model.add(Dropout(dropout_rate))
+    model.add(Dense(n_units_2, activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Dropout(dropout_rate))
+    model.add(Dense(y_categorical.shape[1], activation='softmax'))
 
-# === 6. Callback
+    model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
+
+    early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+
+    model.fit(X_train, y_train,
+              validation_data=(X_val, y_val),
+              epochs=50,
+              batch_size=batch_size,
+              verbose=0,
+              callbacks=[early_stop])
+
+    y_pred = model.predict(X_val, verbose=0)
+    acc = accuracy_score(np.argmax(y_val, axis=1), np.argmax(y_pred, axis=1))
+    return acc
+
+# === Ejecutar Optuna
+study = optuna.create_study(direction="maximize")
+study.optimize(objective, n_trials=300)
+
+# === Entrenar modelo final con mejores parámetros
+best_params = study.best_params
+print("🔧 Mejores hiperparámetros:", best_params)
+
+final_model = Sequential()
+final_model.add(Dense(best_params['n_units_1'], activation='relu', input_shape=(X.shape[1],)))
+final_model.add(BatchNormalization())
+final_model.add(Dropout(best_params['dropout_rate']))
+final_model.add(Dense(best_params['n_units_2'], activation='relu'))
+final_model.add(BatchNormalization())
+final_model.add(Dropout(best_params['dropout_rate']))
+final_model.add(Dense(y_categorical.shape[1], activation='softmax'))
+
+final_model.compile(optimizer=best_params['optimizer'], loss='categorical_crossentropy', metrics=['accuracy'])
+
 early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 
-# === 7. Entrenar
-model.fit(
+final_model.fit(
     X_train, y_train,
     validation_data=(X_val, y_val),
     epochs=100,
-    batch_size=32,
-    callbacks=[early_stop]
+    batch_size=best_params['batch_size'],
+    callbacks=[early_stop],
+    verbose=1
 )
 
-# === 8. Guardar modelo y codificador
+# === Guardar modelo y codificador
 os.makedirs('model', exist_ok=True)
-model.save('model/model_custom.h5')
+final_model.save('model/model_custom.h5')
 with open('model/label_encoder_custom.pkl', 'wb') as f:
     pickle.dump(label_encoder, f)
 
-print("✅ Entrenamiento completo. Modelo y codificador guardados.")
+print("✅ Entrenamiento final completo. Modelo y codificador guardados.")
+# === Guardar los mejores hiperparámetros en un archivo de texto
+with open('model/best_hyperparameters.txt', 'w') as f:
+    for key, value in best_params.items():
+        f.write(f"{key}: {value}\n")
 
-# === 9. Evaluación profunda
-
-# Convertir etiquetas codificadas one-hot a clases
-y_true_classes = np.argmax(y_val, axis=1)
-y_pred = model.predict(X_val)
-y_pred_classes = np.argmax(y_pred, axis=1)
-
-# === Matriz de confusión
-cm = confusion_matrix(y_true_classes, y_pred_classes)
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=label_encoder.classes_)
-disp.plot(xticks_rotation=45, cmap="Blues")
-plt.title("Matriz de Confusión")
-plt.tight_layout()
-plt.show()
-
-# === Reporte de clasificación
-report = classification_report(y_true_classes, y_pred_classes, target_names=label_encoder.classes_)
-print("📋 Reporte de Clasificación:\n")
-print(report)
+print("📄 Hiperparámetros guardados en 'model/best_hyperparameters.txt'")
